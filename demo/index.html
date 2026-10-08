@@ -1,0 +1,56 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Weasley clock card demo</title>
+<style>body{margin:0;background:#111}#bar{position:fixed;bottom:8px;right:8px;z-index:9;display:flex;gap:6px}#bar button{font:13px sans-serif}</style>
+</head><body>
+<!-- Serve this folder's parent over HTTP (e.g. `python -m http.server`) and open /demo/.
+     Everything here is made up: a fake `hass` object stands in for Home Assistant. -->
+<div id="bar"><button data-s="mixed">Mixed</button><button data-s="home">All home</button><button data-s="peril">Peril</button><button data-s="lost">Lost</button></div>
+<weasley-clock-card id="c"></weasley-clock-card>
+<script src="../weasley-clock-card.js"></script>
+<script>
+const now = () => new Date().toISOString();
+const old = (h) => new Date(Date.now() - h * 3600e3).toISOString();
+const zone = (id, name, lat, lon) => [`zone.${id}`, { state: "0", attributes: { friendly_name: name, latitude: lat, longitude: lon }, last_updated: now() }];
+const zones = Object.fromEntries([
+  zone("home", "Home", 51.5074, -0.1278), zone("office", "Office", 51.515, -0.09),
+  zone("university", "University", 51.5246, -0.134), zone("grandmas", "Grandma's", 51.45, -0.2),
+]);
+function person(id, state, lat, lon, ageH = 0.1) {
+  const tr = `device_tracker.${id}_phone`;
+  return {
+    [`person.${id}`]: { state, attributes: { latitude: lat, longitude: lon, device_trackers: [tr] }, last_updated: now() },
+    [tr]: { state, attributes: {}, last_updated: old(ageH) },
+  };
+}
+const bat = (id, v, st = "NotCharging") => ({ [`sensor.${id}_phone_battery`]: { state: String(v) }, [`sensor.${id}_phone_battery_status`]: { state: st } });
+const batteries = () => ({ ...bat("alice", 64), ...bat("bob", 51), ...bat("carol", 80), ...bat("dave", 33), ...bat("erin", 72) });
+const scenes = {
+  mixed: () => ({ ...batteries(), ...person("alice", "Office", 51.515, -0.09), ...person("bob", "StatZon1", 51.5202, -0.1001),
+    ...person("carol", "University", 51.5246, -0.134), ...person("dave", "home", 51.5074, -0.1278), ...person("erin", "Grandma's", 51.45, -0.2) }),
+  home: () => ({ ...batteries(), ...["alice", "bob", "carol", "dave", "erin"].reduce((o, id) => ({ ...o, ...person(id, "home", 51.5074, -0.1278) }), {}) }),
+  peril: () => ({ ...scenes.mixed(), ...person("dave", "not_home", 51.49, -0.15), ...bat("dave", 6) }),
+  lost: () => ({ ...scenes.mixed(), ...person("erin", "not_home", 51.4, -0.3, 6) }),
+};
+const c = document.getElementById("c");
+const P = (id, gem, extra = {}) => ({ name: id[0].toUpperCase() + id.slice(1), entity: `person.${id}`, gem,
+  battery: `sensor.${id}_phone_battery`, battery_status: `sensor.${id}_phone_battery_status`, ...extra });
+c.setConfig({
+  title: "The Demo Family",
+  units: "km",
+  shops_url: "demo-shops.json",
+  people: [
+    P("alice", "sapphire", { work_zones: ["office"] }),
+    P("bob", "ruby"),
+    P("carol", "opal", { school_zones: ["university"] }),
+    P("dave", "emerald"),
+    P("erin", "tigerseye"),
+  ],
+});
+const show = (name) => (c.hass = { states: { ...zones, ...scenes[name]() } });
+document.querySelectorAll("#bar button").forEach((b) => (b.onclick = () => show(b.dataset.s)));
+const params = new URLSearchParams(location.search);
+if (params.get("clean")) document.getElementById("bar").style.display = "none";
+show(params.get("s") || "mixed");
+</script>
+</body></html>
