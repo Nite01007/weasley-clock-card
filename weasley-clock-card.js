@@ -1,6 +1,6 @@
 // Weasley-style family clock card for Home Assistant.
 // One hand per person; faces follow the clock in Goblet of Fire (Mortal Peril at twelve).
-const WC_VERSION = "1.0.0";
+const WC_VERSION = "1.2.0";
 const WC_FONTS = "https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Cinzel+Decorative:wght@700&family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&display=swap";
 
 // Clockwise from twelve.
@@ -65,6 +65,7 @@ class WeasleyClockCard extends HTMLElement {
       title: "Our Family",
       units: "mi",
       stopped_pattern: "^StatZon",
+      place_radius_m: 100,
       lost_after_hours: 4,
       lost_at_home_after_hours: 12,
       peril_battery: 10,
@@ -129,8 +130,11 @@ class WeasleyClockCard extends HTMLElement {
       // iCloud3 makes a temporary "StatZon" zone when someone stops at an unnamed place.
       if (s === "not_home") out = { face: "travelling", sub: dist ? `on the move, ${dist}` : "on the move" };
       else if (new RegExp(cfg.stopped_pattern, "i").test(s)) {
-        const shop = this._shopAt(st);
-        out = shop ? { face: "shopping", sub: shop } : { face: "out", sub: dist || "" };
+        const work = this._placeAt(st, (this._places || {})[p.entity], cfg.place_radius_m);
+        const place = !work && this._listAt(st, this._somewhere);
+        const shop = !work && !place && this._listAt(st, this._shops);
+        out = work ? { face: "work", sub: work } : place ? { face: "somewhere", sub: place }
+          : shop ? { face: "shopping", sub: shop } : { face: "out", sub: dist || "" };
       }
       else out = { face: "somewhere", sub: s };
     }
@@ -140,15 +144,15 @@ class WeasleyClockCard extends HTMLElement {
     return out;
   }
 
-  // Match a stop against the OpenStreetMap shop list: inside a store's outline
+  // Match a stop against an OpenStreetMap list (shops, post offices): inside a store's outline
   // (plus a GPS margin) wins, smallest outline first; otherwise a mapped point within 60 m.
-  _shopAt(st) {
+  _listAt(st, list) {
     const a = st && st.attributes;
-    if (!this._shops || !a || a.latitude == null) return null;
+    if (!list || !a || a.latitude == null) return null;
     const lat = a.latitude, lon = a.longitude;
     const mLat = 40 / 111320, mLon = 40 / (111320 * Math.cos((lat * Math.PI) / 180));
     let best = null, bestArea = Infinity, near = null, nearD = 0.06 / 1.609;
-    for (const s of this._shops) {
+    for (const s of list) {
       if (Math.abs(s.la - lat) > 0.02 || Math.abs(s.lo - lon) > 0.03) continue;
       if (s.b) {
         const [a0, o0, a1, o1] = s.b;
@@ -163,6 +167,18 @@ class WeasleyClockCard extends HTMLElement {
     }
     const hit = best || near;
     return hit ? hit.n || `a ${hit.t.replace(/_/g, " ")}` : null;
+  }
+
+  // Nearest entry of a per-person place list (points only) within radius metres.
+  _placeAt(st, list, radiusM) {
+    const a = st && st.attributes;
+    if (!list || !a || a.latitude == null) return null;
+    let hit = null, best = radiusM / 1609.34;
+    for (const s of list) {
+      const d = miles([a.latitude, a.longitude], [s.la, s.lo]);
+      if (d < best) { hit = s; best = d; }
+    }
+    return hit ? hit.n : null;
   }
 
   _milesFromHome(st, homeZone) {
@@ -184,6 +200,18 @@ class WeasleyClockCard extends HTMLElement {
       this._shopsLoading = true;
       fetch(cfg.shops_url).then((r) => r.json()).then((d) => { this._shops = d; this._last = {}; if (this._hass) this._update(); })
         .catch((e) => console.warn("weasley-clock-card: shops list not loaded", e));
+    }
+    this._places = this._places || {};
+    for (const p of cfg.people) {
+      if (!p.work_places_url || this._places[p.entity]) continue;
+      this._places[p.entity] = [];
+      fetch(p.work_places_url).then((r) => r.json()).then((d) => { this._places[p.entity] = d; this._last = {}; if (this._hass) this._update(); })
+        .catch((e) => console.warn(`weasley-clock-card: work places for ${p.name} not loaded`, e));
+    }
+    if (cfg.somewhere_places_url && !this._somewhereLoading) {
+      this._somewhereLoading = true;
+      fetch(cfg.somewhere_places_url).then((r) => r.json()).then((d) => { this._somewhere = d; this._last = {}; if (this._hass) this._update(); })
+        .catch((e) => console.warn("weasley-clock-card: somewhere places not loaded", e));
     }
     const gems = ["sapphire", "ruby", "emerald", "topaz", "amethyst", "pearl"];
     this._people = cfg.people.map((p, i) => ({ ...p, gem: WC_GEMS[p.gem] ? p.gem : gems[i % gems.length] }));

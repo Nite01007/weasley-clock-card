@@ -1,4 +1,8 @@
-"""Build shops.json for the card's Shopping face from OpenStreetMap (Overpass API).
+"""Build place lists for the card from OpenStreetMap (Overpass API).
+
+By default it builds shops.json for the Shopping face. With --tag it builds a
+list of any other kind of place instead, e.g. post offices or libraries for the
+card's shared `somewhere_places_url` list.
 
 The card never looks anything up while it runs: it only reads this static file.
 Run this once (and again every few months as stores change), then copy the result
@@ -6,6 +10,9 @@ to /config/www/ and point the card's `shops_url` at it.
 
 Example (two areas: 40 km around home, 20 km around a kid's college town):
     python build_shops.py --area 51.5074,-0.1278,40 --area 52.2053,0.1218,20
+
+Post offices and libraries, as one Somewhere list:
+    python build_shops.py --area 51.5074,-0.1278,40 --tag amenity=post_office --tag amenity=library --out somewhere.json
 
 Each --area is LAT,LON,RADIUS_KM. Bigger areas mean a bigger file; ~2,800 shops
 is about 250 KB.
@@ -38,10 +45,13 @@ SERVERS = (
 )
 
 
-def query(lat, lon, radius_m):
-    q = f"""[out:json][timeout:120];
-(nwr[shop](around:{radius_m},{lat},{lon});nwr[amenity~"^(pharmacy|marketplace)$"](around:{radius_m},{lat},{lon}););
-out center bb tags;"""
+def query(lat, lon, radius_m, tags=None):
+    around = f"(around:{radius_m},{lat},{lon})"
+    if tags:
+        sel = "".join(f'nwr["{k}"="{v}"]{around};' for k, v in tags)
+    else:
+        sel = f'nwr[shop]{around};nwr[amenity~"^(pharmacy|marketplace)$"]{around};'
+    q = f"[out:json][timeout:120];({sel});out center bb tags;"
     last = None
     for server in SERVERS:
         req = urllib.request.Request(
@@ -59,6 +69,11 @@ out center bb tags;"""
     raise last
 
 
+def parse_tag(text):
+    k, v = text.split("=", 1)
+    return k.strip(), v.strip()
+
+
 def parse_area(text):
     lat, lon, km = (float(x) for x in text.split(","))
     return lat, lon, int(km * 1000)
@@ -67,14 +82,18 @@ def parse_area(text):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--area", action="append", required=True, type=parse_area, help="LAT,LON,RADIUS_KM (repeatable)")
+    ap.add_argument("--tag", action="append", type=parse_tag, help="KEY=VALUE: build a list of these places instead of shops (repeatable)")
     ap.add_argument("--out", default="shops.json", help="output file (default: shops.json)")
     args = ap.parse_args()
 
     out, seen = [], set()
     for lat, lon, r in args.area:
-        for e in query(lat, lon, r):
+        for e in query(lat, lon, r, args.tag):
             t = e.get("tags", {})
-            kind = t.get("shop") if t.get("shop") in SHOP_TYPES else t.get("amenity") if t.get("amenity") in AMENITY_TYPES else None
+            if args.tag:
+                kind = next((v for k, v in args.tag if t.get(k) == v), None)
+            else:
+                kind = t.get("shop") if t.get("shop") in SHOP_TYPES else t.get("amenity") if t.get("amenity") in AMENITY_TYPES else None
             if not kind or (e["type"], e["id"]) in seen:
                 continue
             seen.add((e["type"], e["id"]))
@@ -84,13 +103,14 @@ def main():
                 c = {"lat": (b["minlat"] + b["maxlat"]) / 2, "lon": (b["minlon"] + b["maxlon"]) / 2}
             if not c:
                 continue
-            rec = {"n": t.get("name") or t.get("brand") or "", "t": kind, "la": round(c["lat"], 6), "lo": round(c["lon"], 6)}
+            name = t.get("name") or t.get("brand") or ("" if not args.tag else kind.replace("_", " ").title())
+            rec = {"n": name, "t": kind, "la": round(c["lat"], 6), "lo": round(c["lon"], 6)}
             if b:
                 rec["b"] = [round(b["minlat"], 6), round(b["minlon"], 6), round(b["maxlat"], 6), round(b["maxlon"], 6)]
             out.append(rec)
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(out, f, separators=(",", ":"), ensure_ascii=False)
-    print(f"{len(out)} shops, {sum('b' in s for s in out)} with building outlines -> {args.out}")
+    print(f"{len(out)} places, {sum('b' in s for s in out)} with building outlines -> {args.out}")
 
 
 if __name__ == "__main__":

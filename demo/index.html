@@ -5,7 +5,7 @@
 </head><body>
 <!-- Serve this folder's parent over HTTP (e.g. `python -m http.server`) and open /demo/.
      Everything here is made up: a fake `hass` object stands in for Home Assistant. -->
-<div id="bar"><button data-s="mixed">Mixed</button><button data-s="home">All home</button><button data-s="peril">Peril</button><button data-s="lost">Lost</button></div>
+<div id="bar"><button data-s="mixed">Mixed</button><button data-s="stops">Stops</button><button data-s="home">All home</button><button data-s="peril">Peril</button><button data-s="lost">Lost</button></div>
 <weasley-clock-card id="c"></weasley-clock-card>
 <script src="../weasley-clock-card.js"></script>
 <script>
@@ -28,6 +28,7 @@ const batteries = () => ({ ...bat("alice", 64), ...bat("bob", 51), ...bat("carol
 const scenes = {
   mixed: () => ({ ...batteries(), ...person("alice", "Office", 51.515, -0.09), ...person("bob", "StatZon1", 51.5202, -0.1001),
     ...person("carol", "University", 51.5246, -0.134), ...person("dave", "home", 51.5074, -0.1278), ...person("erin", "Grandma's", 51.45, -0.2) }),
+  stops: () => ({ ...scenes.mixed(), ...person("dave", "StatZon2", 51.4981, -0.0871), ...person("erin", "StatZon3", 51.51, -0.13) }),
   home: () => ({ ...batteries(), ...["alice", "bob", "carol", "dave", "erin"].reduce((o, id) => ({ ...o, ...person(id, "home", 51.5074, -0.1278) }), {}) }),
   peril: () => ({ ...scenes.mixed(), ...person("dave", "not_home", 51.49, -0.15), ...bat("dave", 6) }),
   lost: () => ({ ...scenes.mixed(), ...person("erin", "not_home", 51.4, -0.3, 6) }),
@@ -39,11 +40,12 @@ c.setConfig({
   title: "The Demo Family",
   units: "km",
   shops_url: "demo-shops.json",
+  somewhere_places_url: "demo-somewhere.json",
   people: [
     P("alice", "sapphire", { work_zones: ["office"] }),
     P("bob", "ruby"),
     P("carol", "opal", { school_zones: ["university"] }),
-    P("dave", "emerald"),
+    P("dave", "emerald", { work_places_url: "demo-work-places.json" }),
     P("erin", "tigerseye"),
   ],
 });

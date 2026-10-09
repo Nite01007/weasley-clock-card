@@ -15,10 +15,10 @@ Nine faces, with Mortal Peril at twelve like the book:
 | **Mortal Peril** | Away from home, phone battery under 10% and not charging |
 | **Lost** | No location report for 4 hours while away, or 12 hours while at home |
 | **Home** | In that person's home zone |
-| **Work** / **School** | In one of that person's work or school zones |
-| **Somewhere** | In any other named zone (a friend's house, grandma's, the gym) |
-| **Shopping** | Stopped at a store (see [Shopping](#shopping)) |
-| **Out and About** | Stopped somewhere that isn't a zone |
+| **Work** / **School** | In one of that person's work or school zones, or stopped at a place on their own work list (see [Place lists](#place-lists)) |
+| **Somewhere** | In any other named zone (a friend's house, grandma's, the gym), or stopped at a place on the shared Somewhere list |
+| **Shopping** | Stopped at a store (see [Place lists](#place-lists)) |
+| **Out and About** | Stopped anywhere else |
 | **Travelling** | Away and moving |
 
 They're checked in that order and the first match wins. The side panel shows each person's face, the place name and when their phone last reported. Tap a hand or a name to open that person's more-info.
@@ -73,6 +73,8 @@ people:
 | `peril_battery` | `10` | Battery % below which an away phone means Mortal Peril |
 | `stopped_pattern` | `^StatZon` | Regex on the person's state that means "stopped at an unnamed place" |
 | `shops_url` | none | Shop list for the Shopping face |
+| `somewhere_places_url` | none | Shared list of places (any person) that count as Somewhere, e.g. post offices |
+| `place_radius_m` | `100` | How close a stop must be to a single-point place on a work list |
 | `face_labels` | | Rename faces, e.g. `{out: "Gallivanting", somewhere: "Visiting"}`. Keys: `peril`, `travelling`, `work`, `school`, `home`, `lost`, `somewhere`, `shopping`, `out` |
 | `links` | | Buttons in the top-left corner, e.g. `[{name: "← Home", path: /lovelace/0}]` |
 
@@ -86,20 +88,49 @@ people:
 | `home_zones` | `[home]` | Zone ids (without `zone.`) that count as home |
 | `work_zones` | `[]` | Zone ids for Work |
 | `school_zones` | `[]` | Zone ids for School |
+| `work_places_url` | | This person's own list of extra work sites (see [Place lists](#place-lists)) |
 | `battery` | | Battery level sensor |
 | `battery_status` | | Charging status sensor (anything containing "charg" but not "not" counts as charging) |
 
-## Shopping
+## Place lists
 
-Find My (and most trackers) only give coordinates, not place names. So the card uses a static list of stores from OpenStreetMap:
+Find My (and most trackers) only give coordinates, not place names. Zones cover the places you name one by one; for everything else the card can read static lists, which are plain JSON files in `/config/www/`. They're only checked when someone is **stopped** at a place that isn't a zone, in this order:
+
+1. that person's own **work list** (`work_places_url`) → Work
+2. the shared **Somewhere list** (`somewhere_places_url`) → Somewhere
+3. the **shop list** (`shops_url`) → Shopping
+4. otherwise → Out and About
+
+The face shows the place's name, e.g. "Work · Riverside Clinic". Nothing is looked up while the card runs.
+
+**List format.** An array of places. `n` is the name shown, `la`/`lo` the coordinates. A place with a building outline (`b`: `[minLat, minLon, maxLat, maxLon]`) matches anywhere inside it plus 40 m; a single point matches within 60 m (shop and Somewhere lists) or `place_radius_m` (work lists, default 100 m, to cover a parking lot):
+
+```json
+[
+  {"n": "Riverside Clinic", "la": 51.4980, "lo": -0.0870},
+  {"n": "Central Library", "la": 51.5100, "lo": -0.1300, "b": [51.5097, -0.1305, 51.5103, -0.1295]}
+]
+```
+
+**Work lists** are handy for people who move between many sites: a nurse, a contractor, someone who covers several offices. Build them however you like (by hand, from a spreadsheet, from a Google My Maps export). A hundred sites is a few kilobytes and doesn't clutter Home Assistant the way a hundred zones would.
+
+### Shops and other place types from OpenStreetMap
+
+`tools/build_shops.py` builds the shop list:
 
 ```
 python tools/build_shops.py --area 51.5074,-0.1278,40 --area 52.2053,0.1218,20
 ```
 
-Each `--area` is `LAT,LON,RADIUS_KM`. Copy the resulting `shops.json` to `/config/www/weasley/` and set `shops_url`. When someone is stopped, the card checks whether they're inside a store's building outline (plus 40 m for GPS error), or within 60 m of a store mapped as a single point. A match puts the hand on Shopping and shows the store name.
+Each `--area` is `LAT,LON,RADIUS_KM`. Copy the resulting `shops.json` to `/config/www/weasley/` and set `shops_url`. Only the one-off query goes to the Overpass API.
 
-Nothing is looked up while the card runs; only the one-off query goes to the Overpass API. Edit `SHOP_TYPES` in the script to change what counts as shopping (by default: groceries, big box, hardware, pharmacy, clothes, malls and similar; gas stations, convenience stores, liquor, salons and car repair stay Out and About). Re-run it every few months as stores change, and remember to cover every area people shop in: a trip outside the circles shows as Out and About.
+With `--tag` it builds a list of any other kind of place, for example a Somewhere list of post offices and libraries:
+
+```
+python tools/build_shops.py --area 51.5074,-0.1278,40 --tag amenity=post_office --tag amenity=library --out somewhere.json
+```
+
+Check the result by hand: OpenStreetMap tags some shipping stores and campus mailrooms as post offices. Edit `SHOP_TYPES` in the script to change what counts as shopping (by default: groceries, big box, hardware, pharmacy, clothes, malls and similar; gas stations, convenience stores, liquor, salons and car repair stay Out and About). Re-run it every few months as stores change, and remember to cover every area people shop in: a trip outside the circles shows as Out and About.
 
 ## Tips (mostly iCloud3)
 
@@ -111,7 +142,7 @@ Nothing is looked up while the card runs; only the one-off query goes to the Ove
 
 ## Demo
 
-`demo/index.html` runs the card with fake data, no Home Assistant needed. From the repo folder run `python -m http.server`, then open http://localhost:8000/demo/.
+`demo/index.html` runs the card with fake data, no Home Assistant needed (the **Stops** button shows a work list, the Somewhere list and a shop at once). From the repo folder run `python -m http.server`, then open http://localhost:8000/demo/.
 
 ## Notes
 
